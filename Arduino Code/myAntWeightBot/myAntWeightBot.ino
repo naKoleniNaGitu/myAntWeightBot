@@ -1,8 +1,116 @@
 #include <Bluepad32.h>
+#include <math.h>
 
 #define BOT_MAX_GAMEPADS 1 
+#define MIN_PROPULSION_SPEED 0
+#define MAX_PROPULSION_SPEED 255
+#define MAX_GAMEPAD_SPEED 512
+#define SCALE_FACTOR MAX_PROPULSION_SPEED/MAX_GAMEPAD_SPEED  // Scale down the input range from [-512, 512] to [-255, 255] for motor control
+#define FORWARD 1
+#define BACKWARD 0
+
+#define LEFT_MOTOR_CTR_PIN_1 1
+#define LEFT_MOTOR_CTR_PIN_2 2
+#define RIGHT_MOTOR_CTR_PIN_1 3
+#define RIGHT_MOTOR_CTR_PIN_2 4
 
 ControllerPtr myControllers[BOT_MAX_GAMEPADS];
+
+/**
+ * Limit Speed
+ * Function to limit calculated motor speed to correct range.
+ * 
+ * @param[in] speed Calculated speed of rotation.
+ * @param[out] limitedSpeed Speed limited into valid range.
+ *
+ */
+uint8_t limitSpeed(float inputSpeed) {
+  uint8_t limitedSpeed = 0;
+  if (inputSpeed < MIN_PROPULSION_SPEED)
+  {
+    limitedSpeed = MIN_PROPULSION_SPEED;
+  }
+  else if (inputSpeed > MAX_PROPULSION_SPEED)
+  {
+    limitedSpeed = MAX_PROPULSION_SPEED;
+  }
+  else
+  {
+    limitedSpeed = (int)inputSpeed;
+  }
+  return limitedSpeed;
+}
+
+/**
+ * Move Motor
+ * Function to move a motor with defined speed and direction using TC1508A module with two control inputs per controled motor.
+ * 
+ * @param[in] ctrPin1 Control output pin of the ESP32 board connected to INT1.
+ * @param[in] ctrPin2 Control output pin of the ESP32 board connected to INT2.
+ * @param[in] speed Calculated speed of rotation.
+ *
+ */
+void moveMotor(uint8_t ctrPin1, uint8_t ctrPin2, float speed)
+{
+  bool motorDirection = FORWARD;
+  uint8_t speedToSet = 0;
+
+  // Limit calculated speed value
+  speedToSet = limitSpeed(fabs(speed));
+
+  // Get direction 
+  if (speed >= 0)
+  {
+    // Forward
+    analogWrite(ctrPin1, speedToSet);
+    digitalWrite(ctrPin2, LOW);
+
+    Serial.print(speedToSet);
+    Serial.print(",");
+  } else
+  {
+    // Backward
+    digitalWrite(ctrPin1, LOW);
+    analogWrite(ctrPin2, speedToSet);
+
+    Serial.print(speedToSet*(-1));
+    Serial.print(",");
+  }
+  
+}
+
+/**
+ * Move Robot
+ * Function to move robot based on commands from gamepad.
+ * 
+ * @param[in] ctl Gamepad controller input.
+ *
+ */
+void moveRobot(ControllerPtr ctl) 
+{
+  int axisY = ctl->axisY();  // Forward and Bakward joystick movement
+  int axisX = ctl->axisX();  // Left and Right joystick movement
+  
+  // Mix Y-axis (forward/reverse) and X-axis (turning/rotation)
+  float left_speed = (axisY + axisX) * SCALE_FACTOR;
+  float right_speed = (axisY - axisX) * SCALE_FACTOR;
+
+  Serial.print("left_speed:");
+  Serial.print(left_speed);
+  Serial.print(",");
+  Serial.print("right_speed:");
+  Serial.print(right_speed);
+  Serial.print(",");
+
+  Serial.print("left_speed_to_set:");
+  moveMotor(LEFT_MOTOR_CTR_PIN_1, LEFT_MOTOR_CTR_PIN_2, left_speed);
+  Serial.print("right_speed_to_set:");
+  moveMotor(RIGHT_MOTOR_CTR_PIN_1, RIGHT_MOTOR_CTR_PIN_2, right_speed);
+
+
+  
+  
+}
 
 // This callback gets called any time a new gamepad is connected.
 // Up to 4 gamepads can be connected at the same time.
@@ -76,6 +184,8 @@ void plotGamepad(ControllerPtr ctl) {
   Serial.println(ctl->axisY());
 }
 
+
+
 void processGamepad(ControllerPtr ctl) {
     // There are different ways to query whether a button is pressed.
     // By query each button individually:
@@ -124,6 +234,7 @@ void processGamepad(ControllerPtr ctl) {
     // Another way to query controller data is by getting the buttons() function.
     // See how the different "dump*" functions dump the Controller info.
     // dumpGamepad(ctl);
+    moveRobot(ctl); 
     plotGamepad(ctl);
 }
 
