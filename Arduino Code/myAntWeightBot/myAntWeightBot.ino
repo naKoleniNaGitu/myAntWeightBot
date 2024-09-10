@@ -3,11 +3,10 @@
 
 #define BOT_MAX_GAMEPADS 1 
 #define MIN_PROPULSION_SPEED 0
-#define MAX_PROPULSION_SPEED 255
+#define MAX_PROPULSION_SPEED 254
+#define MIN_PROPULSION_SPEED_MARGIN 25
 #define MAX_GAMEPAD_SPEED 512
 #define SCALE_FACTOR MAX_PROPULSION_SPEED/MAX_GAMEPAD_SPEED  // Scale down the input range from [-512, 512] to [-255, 255] for motor control
-#define FORWARD 1
-#define BACKWARD 0
 
 #define LEFT_MOTOR_CTR_PIN_1 1
 #define LEFT_MOTOR_CTR_PIN_2 2
@@ -26,11 +25,11 @@ ControllerPtr myControllers[BOT_MAX_GAMEPADS];
  */
 uint8_t limitSpeed(float inputSpeed) {
   uint8_t limitedSpeed = 0;
-  if (inputSpeed < MIN_PROPULSION_SPEED)
+  if (inputSpeed <= MIN_PROPULSION_SPEED + MIN_PROPULSION_SPEED_MARGIN)
   {
     limitedSpeed = MIN_PROPULSION_SPEED;
   }
-  else if (inputSpeed > MAX_PROPULSION_SPEED)
+  else if (inputSpeed >= MAX_PROPULSION_SPEED)
   {
     limitedSpeed = MAX_PROPULSION_SPEED;
   }
@@ -52,14 +51,13 @@ uint8_t limitSpeed(float inputSpeed) {
  */
 void moveMotor(uint8_t ctrPin1, uint8_t ctrPin2, float speed)
 {
-  bool motorDirection = FORWARD;
   uint8_t speedToSet = 0;
 
   // Limit calculated speed value
   speedToSet = limitSpeed(fabs(speed));
 
   // Get direction 
-  if (speed >= 0)
+  if (speed > 0)
   {
     // Forward
     analogWrite(ctrPin1, speedToSet);
@@ -67,13 +65,21 @@ void moveMotor(uint8_t ctrPin1, uint8_t ctrPin2, float speed)
 
     Serial.print(speedToSet);
     Serial.print(",");
-  } else
+  } else if (speed < 0)
   {
     // Backward
     digitalWrite(ctrPin1, LOW);
     analogWrite(ctrPin2, speedToSet);
 
     Serial.print(speedToSet*(-1));
+    Serial.print(",");
+  } else
+  {
+    // Backward
+    digitalWrite(ctrPin1, LOW);
+    digitalWrite(ctrPin2, LOW);
+
+    Serial.print(0);
     Serial.print(",");
   }
   
@@ -253,6 +259,11 @@ void processControllers() {
 
 // Arduino setup function. Runs in CPU 1
 void setup() {
+
+    pinMode(LEFT_MOTOR_CTR_PIN_1, OUTPUT);
+    pinMode(LEFT_MOTOR_CTR_PIN_2, OUTPUT);
+    pinMode(RIGHT_MOTOR_CTR_PIN_1, OUTPUT);
+    pinMode(RIGHT_MOTOR_CTR_PIN_2, OUTPUT);
     Serial.begin(115200);
     Serial.printf("Firmware: %s\n", BP32.firmwareVersion());
     const uint8_t* addr = BP32.localBdAddress();
@@ -281,8 +292,8 @@ void loop() {
     // This call fetches all the controllers' data.
     // Call this function in your main loop.
     bool dataUpdated = BP32.update();
-    if (dataUpdated)
-        processControllers();
+    //if (dataUpdated)
+    processControllers();
 
     // The main loop must have some kind of "yield to lower priority task" event.
     // Otherwise, the watchdog will get triggered.
