@@ -1,3 +1,5 @@
+// myAntWeightBot is based on a Bluepad32 template.
+// https://github.com/ricardoquesada/esp-idf-arduino-bluepad32-template?tab=readme-ov-file
 // SPDX-License-Identifier: Apache-2.0
 // Copyright 2021 Ricardo Quesada
 // http://retro.moe/unijoysticle2
@@ -5,21 +7,10 @@
 #include "sdkconfig.h"
 
 #include <Arduino.h>
-#include <Bluepad32.h>
-
-//
-// README FIRST, README FIRST, README FIRST
-//
-// Bluepad32 has a built-in interactive console.
-// By default, it is enabled (hey, this is a great feature!).
-// But it is incompatible with Arduino "Serial" class.
-//
-// Instead of using "Serial" you can use Bluepad32 "Console" class instead.
-// It is somewhat similar to Serial but not exactly the same.
-//
-// Should you want to still use "Serial", you have to disable the Bluepad32's console
-// from "sdkconfig.defaults" with:
-//    CONFIG_BLUEPAD32_USB_CONSOLE_ENABLE=n
+#include <Bluepad32.h>            // Bluetooth controller and BL stack
+#include <math.h>                 // Math functions i.e. for smoothing filter
+#include <ESP32Servo.h>           // Servo and ESC (brushless motor) control
+#include <SparkFun_TB6612.h>      // DC motor control
 
 ControllerPtr myControllers[BP32_MAX_GAMEPADS];
 
