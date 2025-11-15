@@ -7,12 +7,124 @@
 #include "sdkconfig.h"
 
 #include <Arduino.h>
-#include <Bluepad32.h>            // Bluetooth controller and BL stack
-#include <math.h>                 // Math functions i.e. for smoothing filter
-#include <ESP32Servo.h>           // Servo and ESC (brushless motor) control
-#include <SparkFun_TB6612.h>      // DC motor control
+#include <Bluepad32.h>                      // Bluetooth controller and BL stack
+#include <math.h>                           // Math functions i.e. for smoothing filter
+#include <ESP32Servo.h>                     // Servo and ESC (brushless motor) control
+#include <SparkFun_TB6612.h>                // DC motor control
+#include <WiFi.h>                           // For telemetry talker
+#include <esp_now.h>                        // For telemetry talker
+
+
+// Battery measurement configuration
+const int ADC_PIN = 6;                      // GPIO6
+const int MOSFET_CTRL_PIN = 18;             // GPIO18 gate control MOSFET transistors
+const int ADC_SAMPLES = 10;                 // Number of ADC readings for better stability
+const int RC_FILTER_DELAY_MS = 5;           // Number of ADC readings for better stability
+const int N_CELLS = 3;                      // Number of battery cells in series (designed for 3S 11.4V)
+
+// Divider resistor values (Ohms)
+const float R_TOP = 33000.0;
+const float R_BOTTOM = 7500.0;
+
+// Telemetry talker configuration
+const int TELEMETRY_UPDATE_PERIOD_MS = 1000;
+uint8_t LISTENER_MAC[] = {0x34, 0xB7, 0xDA, 0x5B, 0x6F, 0xA8};  // Listener's MAC address
+
+// Telemetry Talker global variables
+typedef struct telemetry_struct_message {
+  float value;
+} telemetry_struct_message;
+
+telemetry_struct_message outgoingData;
+esp_now_peer_info_t peerInfo;
+unsigned long lastMsgTalker = 0;
+
+
 
 ControllerPtr myControllers[BP32_MAX_GAMEPADS];
+
+// Function declarations
+void batteryMeasurementSetup(void);
+float batteryMeasurementSingleCell(void);
+void telemtryOnDataSent(const uint8_t *mac_addr, esp_now_send_status_t status);
+void telemetrySetup();
+void telemetrySend();
+
+
+void batteryMeasurementSetup() {
+    pinMode(MOSFET_CTRL_PIN, OUTPUT);       // Control pin 
+    digitalWrite(MOSFET_CTRL_PIN, LOW);     // Turn Off measurement circuit initially
+    analogReadResolution(12);               // Set the resolution to 12 bits (0-4095)
+}
+
+float batteryMeasurementSingleCell() {
+    digitalWrite(MOSFET_CTRL_PIN, HIGH);    // Turn On measurement circuit
+    delay(RC_FILTER_DELAY_MS);              // Wait for RC filter to settle (5 ms)
+
+                                            // Take multiple ADC samples for stability
+    int sum = 0;
+        for (int i = 0; i < ADC_SAMPLES; i++) {
+        sum += analogReadMilliVolts(ADC_PIN);
+    }
+    digitalWrite(MOSFET_CTRL_PIN, LOW);     // Turn Off measurement circuit to save power
+
+    float adcVoltageStable = sum / ADC_SAMPLES;
+    float batteryVoltageStable = (adcVoltageStable*(R_TOP+R_BOTTOM))/R_BOTTOM;
+    float cellVoltage = batteryVoltageStable / N_CELLS;
+
+    // print out the values you read:
+    Console.printf("ADC voltage = %.2fmV\n", adcVoltageStable);
+    Console.printf("Battery voltage = %.2fmV\n", batteryVoltageStable);
+    Console.printf("Cell voltage = %.2fmV\n", cellVoltage);
+
+    return cellVoltage / 1000;
+}
+
+void telemtryOnDataSent(const uint8_t *mac_addr, esp_now_send_status_t status) {
+    Console.print("Send Status: ");
+    Console.println(status == ESP_NOW_SEND_SUCCESS ? "Success" : "Fail");
+}
+
+void telemetrySetup() {
+    WiFi.mode(WIFI_STA);
+    WiFi.disconnect();                      // Important: prevent connection to any AP
+    WiFi.setSleep(false);                   // No power save mode
+    delay(100);                             // Delay due to compatibility
+    Console.println(WiFi.macAddress());     // Print out MAC address of the talker
+
+    if (esp_now_init() != ESP_OK) {
+        Console.println("Error initializing ESP-NOW");
+        return;
+    }
+
+    esp_now_register_send_cb(telemtryOnDataSent);
+
+    memcpy(peerInfo.peer_addr, LISTENER_MAC, 6);
+    peerInfo.channel = 0;
+    peerInfo.encrypt = false;
+
+    if (esp_now_add_peer(&peerInfo) != ESP_OK) {
+        Console.println("Failed to add peer");
+        return;
+    }
+    Console.println("Telemetry talker ready!");
+}
+
+void telemetrySend() {
+    // Send telemetry data every TELEMETRY_UPDATE_PERIOD_MS
+    if (lastMsgTalker+TELEMETRY_UPDATE_PERIOD_MS <= millis()) {
+        lastMsgTalker = millis();           // Update timestamp
+        outgoingData.value = batteryMeasurementSingleCell(); 
+
+        esp_err_t result = esp_now_send(LISTENER_MAC, (uint8_t *)&outgoingData, sizeof(outgoingData));
+
+        if (result == ESP_OK) {
+            Console.printf("Sent value %.2f\n", outgoingData.value);
+        } else {
+            Console.println("Error sending data");
+        }
+    }
+}
 
 // This callback gets called any time a new gamepad is connected.
 // Up to 4 gamepads can be connected at the same time.
@@ -291,6 +403,11 @@ void setup() {
     // This service allows clients, like a mobile app, to setup and see the state of Bluepad32.
     // By default, it is disabled.
     BP32.enableBLEService(false);
+
+    delay(200);                             // Delay for BLE and ESP-Now compatibility
+    telemetrySetup();                       // Initial telemetry setup
+    batteryMeasurementSetup();              // Initial battery measurement setup
+    batteryMeasurementSingleCell();         // Measurement test (only in console)
 }
 
 // Arduino loop function. Runs in CPU 1.
@@ -309,4 +426,6 @@ void loop() {
 
     //     vTaskDelay(1);
     delay(150);
+
+    telemetrySend();                        // Call telemetry
 }
